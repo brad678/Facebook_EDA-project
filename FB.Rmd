@@ -1,0 +1,394 @@
+---
+title: "FB"
+output: 
+  html_document: 
+    smart: no
+---
+#Exploratory questions:::
+
+1) Loading and cleaning of data (handling missing values)
+2) Summary statistics
+3) Age analysis (Date of Birth analysis)
+4) Which age group and gender visit FB more ?
+5) Which age group and gender have more friends ?
+6) Which age group and gender do more "likes" ?
+7) Propotions of likes done through mobile and web
+8) Does users doing "no likes"" : do they login to facebook less or got less friends
+9) If users visit FB more, then are the chances of making friends more ?
+10) Do users visiting FB more, do more "likes" ?
+11) Do users with more friends, do more "likes" ?
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+```
+
+
+### Loading the dataset and taking glimpse of the data
+
+```{r}
+fb <- read.csv('pseudo_facebook.tsv',sep='')
+glimpse(fb)
+```
+
+### Getting the summary to check the columns that are having missing data
+
+```{r}
+summary(fb)
+```
+can find that Gender(175),Tenure(2) are having missing values
+
+This has limited columns so we can easily view and tell, but for huge datasets with many columns, it would be diffucult to see and note it. A better approach is to have a function which can be called multiple times to give the stats. 
+
+### Finding columns and rows with missing values using function
+```{r}
+miss <- function() {
+ cat('\nThe columns having missing values are:')
+ for(i in 1:ncol(fb)) {
+  if(length(fb[i][is.na(fb[i])]) > 0) {
+    cat('\n',names(fb[i]),':',length(fb[i][is.na(fb[i])]))
+  }
+ } 
+  cat('\n\nThe number of rows with missing values are:',nrow(fb)-nrow(na.omit(fb)))
+}
+
+miss()
+```
+
+### Creating new column age_group
+```{r}
+breaks <- c(0,12,17,24,34,44,54,64,115)
+
+group1 <- findInterval(fb$age,breaks)
+
+age_group <- factor(group1,levels=c(1:8),labels=c('0-12','13-17','18-24','25-34','35-44','45-54','55-64','65 and older'))
+
+fb <- fb %>% mutate(age_group)
+
+fb %>% select(age,age_group) %>% tail(20)
+
+```
+### Find the number of missing values for each group. 
+
+```{r}
+fb %>% group_by(age_group) %>% count(gender) %>% filter(is.na(gender))
+
+```
+
+Can find that the missing values for gender are present mostly in 55-64 and 65+ bracket. Also the proportion of males and females in that category is almost similar.
+
+```{r}
+
+f2 <- fb %>% group_by(age_group,gender) %>% summarise(tenure=round(mean(tenure,na.rm=TRUE)),friend_count=round(mean(friend_count)),friendships_initiated=round(mean(friendships_initiated)),likes=round(mean(likes)),likes_received=round(mean(likes_received)),count=n()) %>% filter(!is.na(gender))
+
+f2
+
+
+```
+
+
+Can infer that even though male count is greater than female:
+
+- tenure for female is greater than male                     
+
+- friends count for female is greater than male (with exception of 65+ group)
+
+- frienships initiated for female is greater than male (with exception of 65+ group)                                                             
+
+- likes for female is greater than male (we can find substantial difference between male & female)                                                    
+
+- likes received for female is greater than male (we can find substantial difference between male & female)                                         
+
+
+### Create a new dataframe with missing values and remove missing values from the original dataframe
+```{r}
+
+fbm <- fb %>% filter(is.na(gender))
+
+fbm <- mutate(fbm,new=paste(age_group,likes,likes_received,sep='#'))
+
+fb <- na.omit(fb)
+
+```
+
+
+Since "likes" and "likes received"" is having substantial difference between male (low value) and female(high value). We can use these fields to determine gender for missing values.   
+
+- If individual element(like/like received in 'fbm') is less compared to group(like/like received of male in 'f2') then we can safely assume its male.
+
+- If individual element(like/like received in 'fbm') is greater compared to group(like/like received of female in 'f2') then we can safely assume its female. 
+
+- since Tenure is having very low number(2) of missing values, its better to drop those rows.
+
+
+```{r}
+func1 <- function(str1) {
+  k <- strsplit(str1,split='#')
+  x=k[[1]][1]
+  y=k[[1]][2]
+  z=k[[1]][3]
+  
+  temp <- filter(f2,age_group==x)[2,]
+  
+  if(as.numeric(y) <= temp$likes & as.numeric(z)<=temp$likes_received) {
+    return('male')
+  } 
+  
+  temp <- filter(f2,age_group==x)[1,]
+  if(as.numeric(y) >= temp$likes & as.numeric(z)>=temp$likes_received) {
+    return('female')
+  } 
+ }
+   
+#updating new column with gender
+fbm$new <- sapply(fbm$new,func1)
+
+
+#converting new column of type "list" to gender of type "factor"
+for(i in 1:nrow(fbm)) {
+  if(is.null(fbm$new[[i]])) {
+    fbm$gender[i] <- NA
+  } 
+  else {
+    fbm$gender[i] <- as.factor(fbm$new[[i]])
+    }
+  }
+
+#dropping new column
+fbm <- fbm[,-17]
+
+#dropping missing values 
+fbm <- na.omit(fbm)
+
+glimpse(fbm)
+
+```
+
+
+Can find that out of 175 missing values for gender, we are able to determine gender for 139 cases. Dropped rest of the 36 cases as there is no clear consensus
+
+
+### Now concatenate imputed missing value dataframe to original one
+
+```{r}
+fb <- rbind(fb,fbm)
+
+# calling missing value function for sanity checking
+miss()
+
+```
+
+Now the data is cleaned and is ready for further analysis
+
+### summary stats
+
+```{r}
+summary(fb)
+
+```
+
+### Age analysis::
+####Distribution of Age_group
+
+```{r}
+ 
+ggplot(fb,aes(age_group))+geom_bar(fill='red',color='black')+ggtitle("Distribution of age group")
+
+```
+
+- Can infer that there are many young adults(18-24) and adults(25-34) facebook users 
+
+### Checking users above age of 90
+
+```{r}
+length(fb$age[fb$age>90])
+fb %>% select(dob_year,age) %>% filter(age>90) %>% head(20)
+```
+Can infer below:
+
+- There are many users(4894) above age of 90 which is unlikely. These are outliers in the data.
+
+- This dataset is corresponding to the year 2013 (as for dob_year=1913, age is 100)
+
+
+### Let's look at the distribution of age to understand further
+```{r}
+
+summary(fb$age)
+hist(fb$age)
+
+```
+
+### Need to remove the outliers in age(above 90 years) so as to avoid bias
+
+```{r}
+fb <- fb %>% filter(age<=90)
+
+```
+
+### Taking random sample(500 for each age group and gender) from the population(94K)
+
+```{r}
+fb_samp <- fb %>% group_by(age_group,gender) %>% sample_n(500)
+
+fb_samp %>% select(age_group,gender) %>% count
+
+```
+
+Can find gender and age group combination is having same count
+
+
+### Which age group and gender visit FB more ?
+
+```{r}
+
+library(scales)
+ggplot(fb_samp,aes(age_group,tenure,fill=age_group))+geom_bar(stat='identity')+facet_wrap(~gender,nrow=2)+scale_y_continuous(labels = comma)+ggtitle("Age group vs Tenure vs Gender")
+
+```
+Can infer that:
+
+- Middle aged and older people have been on site for more occasions than the younger lot.
+
+- Among males and females, females are using facebook more compared to males.
+
+
+### Which age group and gender have more friends ?
+
+```{r}
+ggplot(fb_samp,aes(age_group,friend_count,fill=age_group))+geom_bar(stat='identity')+facet_wrap(~gender,nrow=2)+scale_y_continuous(labels = comma)+ggtitle("Age group vs Friend_count vs Gender")
+
+```
+
+Can infer that:
+
+- The trend here looks opposite to the trend of tenure
+
+- Even though Middle aged and older people use the site more: when it comes to networking with friends, the younger ones(13-24) are better
+
+- Females have far more friends compared to male (trend similar to tenure)
+
+- Surprisingly, older people have more friends that middle aged people.
+
+
+
+### Which age group and gender do more "likes" ?
+
+```{r}
+ggplot(fb_samp,aes(gender,log2(likes),fill=gender))+geom_boxplot()+facet_wrap(~age_group,nrow=2)+ggtitle("Gender vs log2(likes) vs Age group")
+
+```
+
+Can infer that:
+
+- There are many users who don't use "like"
+
+- Females tend to use "like" more than males. 
+
+- There are few outliers in males (who do very high number of "likes")
+
+
+### Proportions of likes done through mobile and web
+
+```{r}
+
+MB <- sum(fb$mobile_likes)
+WB <- sum(fb$www_likes)
+
+slices <- c(MB,WB) 
+lbls <- c("MOBILE", "WEB")
+
+pct <- round(slices/sum(slices)*100)
+
+lbls <- paste(lbls, pct) # add percents to labels 
+lbls <- paste(lbls,"%",sep="") # ad % to labels 
+
+pie(slices,labels = lbls, col=c('purple','violetred1'),
+  	main="Pie Chart of likes through Mobile and web")
+
+
+```
+
+- Can infer that "likes"" done with mobile is far greater than that of web. We can safely assume that facebook app is more convenient to use than web
+
+### Does users doing "no likes"" : do they login to facebook less or got less friends
+
+```{r}
+fb_like0 <- fb %>% filter(likes==0)
+
+ggplot(fb_like0,aes(tenure,..count..,fill=gender))+geom_density(kernel='gaussian')+ggtitle('Distribution of Tenure for likes=0')
+
+cat('The count of males and females with 0 likes:')
+table(fb_like0$gender)
+
+cat('\nThe summary stats of friend count:\n')
+summary(fb_like0$friend_count)
+
+```
+
+Can infer that:
+
+- The users who donot do "likes", login to facebook considerable number of times.
+
+- They dont "like" as they are not keen/donot like "like" feature
+
+- one more reason they dont use "like" is because they got very less number of friends. So less content for "like"
+
+- The percentage of males who donot do "like" is far more than females.
+
+
+### If users visit FB more, then are the chances of making friends more ?
+
+
+```{r}
+
+ggplot(fb_samp,aes(log2(tenure),log2(friend_count),color=gender))+geom_jitter()+geom_smooth(method="lm")+ggtitle('Tenure vs Friend count')
+
+```
+
+Can infer that:
+
+- The user visiting the siting more tend to make more friends.
+
+- Can also be said as, the user with more friends visit the site more.
+
+- However the above stated trends is not very much apparent and having lots of outliers. This can be re-iterated as "Tenure is effecting friend count(positive relationship) marginally"
+
+
+### Do users visiting FB more, do more "likes" ?
+
+```{r}
+
+ggplot(fb_samp,aes(log2(tenure),log2(likes),alpha=gender))+geom_jitter()+geom_smooth(method="lm")+ggtitle('Tenure vs likes')
+
+```
+
+Can infer that:
+
+- The user visiting the siting more tend to do more "likes" marginally. 
+
+- Though it is marginal, females visting the site more tend to do more "likes" compared to males
+
+
+### Do users with more friends, do more "likes" ?
+
+```{r}
+
+ggplot(fb_samp,aes(log2(friend_count),log2(likes),color=gender))+geom_point()+geom_smooth(method="lm")+ggtitle('Friend count vs likes')
+
+
+```
+
+Can infer that:
+
+- Users with more friends tend to do more "like" (though there are few outliers that doesn't fit nicely)
+
+- Females with more friends tend to do more "like" compared with males 
+
+
